@@ -1,0 +1,123 @@
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(gridExtra)
+library(ranger)
+library(vip)
+library(skimr)
+library(ggplot2)
+library(GGally)
+library(ggcorrplot)
+library(ROCR)
+library(mice)
+library(rpart) #for classification trees
+library(rpart.plot) #for plotting trees
+library(usemodels)
+library(xgboost)
+```
+
+
+```{r}
+test = read_csv("/Users/gregwolcott/Documents/UNCW/BAN 502 - Predictive Analytics/Course Project/product-failure-kaggle-competition-s24/test.csv")
+train = read_csv("/Users/gregwolcott/Documents/UNCW/BAN 502 - Predictive Analytics/Course Project/product-failure-kaggle-competition-s24/train.csv")
+```
+
+```{r}
+#Convert data to factors
+train = train %>% select(-id,-product_code,-attribute_1,-attribute_2,-attribute_3)
+train = train %>% mutate(failure = as_factor(failure))
+train = train %>% mutate(attribute_0 = as_factor(attribute_0))
+
+```
+
+
+```{r}
+set.seed(12345) #sets seed for random number generator
+imp_final = mice(train, m=5, method='pmm', printFlag=FALSE)
+train = complete(imp_final) 
+```
+
+
+```{r}
+use_xgboost(failure ~loading + measurement_17+measurement_16+measurement_13+measurement_8, train) #comment me out before knitting
+```
+
+```{r}
+set.seed(123)
+folds = vfold_cv(train, v=5)
+```
+
+
+```{r}
+start_time = Sys.time() #for timing
+
+
+
+xgboost_recipe <- 
+  recipe(formula = failure ~ loading + measurement_17 + measurement_16 + measurement_13 + 
+    measurement_8, data = train) %>% 
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE) %>% 
+  step_zv(all_predictors()) 
+
+xgboost_spec <- 
+  boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(), 
+    loss_reduction = tune(), sample_size = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("xgboost") 
+
+xgboost_workflow <- 
+  workflow() %>% 
+  add_recipe(xgboost_recipe) %>% 
+  add_model(xgboost_spec) 
+
+set.seed(78022)
+xgboost_tune <-
+  tune_grid(xgboost_workflow, resamples = folds, grid = 25)
+
+end_time = Sys.time()
+end_time - start_time
+```
+
+
+
+```{r}
+best_xgb = select_best(xgboost_tune, "accuracy")
+
+final_xgb = finalize_workflow(
+  xgboost_workflow,
+  best_xgb
+)
+
+final_xgb
+```
+
+
+```{r}
+final_xgb_fit = fit(final_xgb, train)
+trainpredxgb = predict(final_xgb_fit, train)
+```
+
+```{r}
+confusionMatrix(trainpredxgb$.pred_class, train$failure, 
+                positive = "No")
+```
+
+
+```{r}
+set.seed(12345) #sets seed for random number generator
+test_imp_final = mice(test, m=5, method='pmm', printFlag=FALSE)
+test = complete(test_imp_final) 
+```
+
+
+```{r}
+testpredxgb = predict(final_xgb_fit, test)
+test$preds = testpredxgb$.pred_class
+```
+
+
+```{r}
+write_csv(test,"predictiontest4.csv")
+```
+

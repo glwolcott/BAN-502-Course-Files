@@ -1,0 +1,187 @@
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(gridExtra)
+library(ranger)
+library(vip)
+library(skimr)
+library(ggplot2)
+library(GGally)
+library(ggcorrplot)
+library(ROCR)
+library(mice)
+library(rpart) #for classification trees
+library(rpart.plot) #for plotting trees
+```
+
+
+
+```{r}
+#Read in Data
+test = read_csv("/Users/gregwolcott/Documents/UNCW/BAN 502 - Predictive Analytics/Course Project/product-failure-kaggle-competition-s24/test.csv")
+train = read_csv("/Users/gregwolcott/Documents/UNCW/BAN 502 - Predictive Analytics/Course Project/product-failure-kaggle-competition-s24/train.csv")
+
+```
+
+```{r}
+str(train)
+summary(train)
+head(train)
+```
+
+```{r}
+#Convert data to factors
+train = train %>% select(-id,-attribute_0,-attribute_2,-attribute_1,-attribute_3)
+train = train %>% mutate(product_code = as_factor(product_code))
+train = train %>% mutate(failure = as_factor(failure))
+train = train %>% filter(measurement_0 < 14)
+train = train %>% filter(measurement_1 < 21)
+train = train %>% filter(measurement_2 < 15)
+train = train %>% filter(measurement_17 < 1035)
+
+```
+
+```{r}
+summary(train)
+```
+
+```{r}
+set.seed(12345) #sets seed for random number generator
+imp_final = mice(train, m=5, method='pmm', printFlag=FALSE)
+train = complete(imp_final) 
+
+#Look at cleaned up data
+summary(train)
+```
+
+
+```{r}
+set.seed(5144)
+folds = vfold_cv(train, v=5)
+```
+
+
+```{r}
+glmnet_recipe <- 
+  recipe(formula = failure ~ loading+measurement_2+measurement_4+measurement_17+product_code, data = train) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_normalize(all_predictors(), -all_nominal()) 
+
+glmnet_spec <- 
+  logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_mode("classification") %>% 
+  set_engine("glmnet") 
+
+glmnet_workflow <- 
+  workflow() %>% 
+  add_recipe(glmnet_recipe) %>% 
+  add_model(glmnet_spec) 
+
+glmnet_grid = grid_regular(penalty(), levels = 100)
+
+#note the use of alternative metric (min log loss)
+glmnet_tune <- 
+  tune_grid(glmnet_workflow, resamples = folds, 
+            grid = glmnet_grid, metrics = metric_set(mn_log_loss))
+```
+
+```{r}
+glmnet_tune %>%
+  collect_metrics() %>%
+  ggplot(aes(penalty, mean)) +
+  geom_errorbar(aes(
+    ymin = mean - std_err,
+    ymax = mean + std_err
+  ),
+  alpha = 0.5
+  ) +
+  geom_line(size = 1.5) +
+  theme(legend.position = "none")
+```
+
+
+```{r}
+glmnet_tune %>%
+  collect_metrics() %>%
+  ggplot(aes(penalty, mean)) +
+  geom_errorbar(aes(
+    ymin = mean - std_err,
+    ymax = mean + std_err
+  ),
+  alpha = 0.5
+  ) +
+  geom_line(size = 1.5) +
+  theme(legend.position = "none") + 
+  xlim(0,0.1)
+```
+
+
+
+```{r}
+best_mnlog = glmnet_tune %>%
+  select_best("mn_log_loss")
+best_mnlog
+```
+
+
+```{r}
+final_lasso = glmnet_workflow %>% finalize_workflow(best_mnlog)
+
+```
+
+```{r}
+lasso_fit = fit(final_lasso, train)
+
+```
+
+
+
+```{r}
+options(scipen = 999)
+lasso_fit %>%
+  extract_fit_parsnip() %>%
+  pluck("fit")  %>% 
+  coef(s = best_mnlog$penalty) #show the coefficients for our selected lambda value
+options(scipen = 0)
+```
+
+
+```{r}
+tidy(lasso_fit)
+
+```
+
+
+```{r}
+predictions = predict(lasso_fit, train, type="prob")[2]
+
+ROCRpred = prediction(predictions, train$failure) 
+
+###You shouldn't need to ever change the next two lines:
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7))
+```
+
+
+```{r}
+opt.cut = function(perf, pred){
+    cut.ind = mapply(FUN=function(x, y, p){
+        d = (x - 0)^2 + (y-1)^2
+        ind = which(d == min(d))
+        c(sensitivity = y[[ind]], specificity = 1-x[[ind]], 
+            cutoff = p[[ind]])
+    }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+print(opt.cut(ROCRperf, ROCRpred))
+```
+
+```{r}
+predict(lasso_fit, train)
+```
+```{r}
+train2 = train
+train2$preds = predict(lasso_fit, train)
+summary(train2)
+```
+

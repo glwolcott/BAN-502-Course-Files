@@ -1,0 +1,131 @@
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(gridExtra)
+library(ranger)
+library(vip)
+library(skimr)
+library(ggplot2)
+library(GGally)
+library(ggcorrplot)
+library(ROCR)
+library(mice)
+library(rpart) #for classification trees
+library(rpart.plot) #for plotting trees
+library(randomForest)
+```
+
+
+
+```{r}
+#Read in Data
+test = read_csv("/Users/gregwolcott/Documents/UNCW/BAN 502 - Predictive Analytics/Course Project/product-failure-kaggle-competition-s24/test.csv")
+train = read_csv("/Users/gregwolcott/Documents/UNCW/BAN 502 - Predictive Analytics/Course Project/product-failure-kaggle-competition-s24/train.csv")
+
+```
+
+```{r}
+
+summary(train)
+
+```
+
+
+```{r}
+#Convert data to factors
+train = train %>% select(-id,-product_code,-attribute_1,-attribute_2,-attribute_3)
+train = train %>% mutate(failure = as_factor(failure))
+train = train %>% mutate(attribute_0 = as_factor(attribute_0))
+
+
+```
+
+```{r}
+summary(train)
+```
+
+```{r}
+set.seed(12345) #sets seed for random number generator
+imp_final = mice(train, m=5, method='pmm', printFlag=FALSE)
+train = complete(imp_final) 
+
+
+```
+
+
+```{r}
+set.seed(5144)
+rf_folds = vfold_cv(train, v=5)
+```
+
+
+```{r}
+train_recipe = recipe(failure ~loading + measurement_17+measurement_16+measurement_13+measurement_8, train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+rf_model = rand_forest() %>% 
+  set_engine("ranger", importance = "permutation") %>% 
+  set_mode("classification")
+
+train_wflow = 
+  workflow() %>% 
+  add_model(rf_model) %>% 
+  add_recipe(train_recipe)
+
+
+
+set.seed(123)
+train_fit = fit(train_wflow,train)
+
+```
+
+
+```{r}
+trainpredrf = predict(train_fit, train)
+confusionMatrix(trainpredrf$.pred_class, train$failure, 
+                positive = "No")
+```
+
+
+
+```{r}
+train2 = train
+train2$preds = trainpredrf$.pred_class
+train2
+```
+
+
+
+```{r}
+set.seed(12345) #sets seed for random number generator
+test_imp_final = mice(test, m=5, method='pmm', printFlag=FALSE)
+test = complete(test_imp_final) 
+```
+
+
+```{r}
+skim(test)
+```
+
+
+```{r}
+testpredrf = predict(train_fit, test)
+test3 = test
+test3$preds = testpredrf$.pred_class
+```
+
+
+```{r}
+test3
+```
+
+
+```{r}
+write_csv(test3,"predictiontest6.csv")
+```
+
+
+
+
+
