@@ -1,0 +1,146 @@
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(GGally)
+library(ggcorrplot)
+library(cluster)
+library(dendextend)
+library(factoextra)
+```
+
+```{r}
+trucks = read_csv("/Users/gregwolcott/Documents/UNCW/BAN 502 - Predictive Analytics/Module 6/trucks.csv")
+```
+
+```{r}
+trucks = trucks  %>% select(-Driver_ID)
+summary(trucks)
+```
+
+```{r}
+#1
+ggplot(trucks,aes(x=Distance,y=Speeding)) + geom_point()
+```
+
+```{r}
+#2
+trucks_scaled = scale(trucks) 
+summary(trucks_scaled)
+```
+
+```{r}
+#3
+set.seed(64)
+clusts = 
+  tibble(k = 2) %>% #try from 1 to 10 clusters
+  mutate(
+    kclust = map(k, ~kmeans(trucks_scaled, .x)),
+    tidied = map(kclust, tidy),
+    glanced = map(kclust, glance),
+    augmented = map(kclust, augment, trucks_scaled)
+  )
+
+clusts
+```
+
+```{r}
+clusters =
+  clusts %>%
+  unnest(cols = c(tidied))
+
+assignments = 
+  clusts %>% 
+  unnest(cols = c(augmented))
+
+clusterings = 
+  clusts %>%
+  unnest(cols = c(glanced))
+```
+
+
+```{r}
+p1 = 
+  ggplot(assignments, aes(x = Distance, y = Speeding)) +
+  geom_point(aes(color = .cluster), alpha = 0.8) + 
+  facet_wrap(~ k)
+p1
+```
+
+
+```{r}
+#4
+set.seed(412)
+clusts2 = 
+  tibble(k = 1:8) %>% #try from 1 to 10 clusters
+  mutate(
+    kclust2 = map(k, ~kmeans(trucks_scaled, .x)),
+    tidied2 = map(kclust2, tidy),
+    glanced2 = map(kclust2, glance),
+    augmented2 = map(kclust2, augment, trucks_scaled)
+  )
+
+clusters2 =
+  clusts2 %>%
+  unnest(cols = c(tidied2))
+
+assignments2 = 
+  clusts2 %>% 
+  unnest(cols = c(augmented2))
+
+clusterings2 = 
+  clusts2 %>%
+  unnest(cols = c(glanced2))
+
+p2 = 
+  ggplot(assignments2, aes(x = Distance, y = Speeding)) +
+  geom_point(aes(color = .cluster), alpha = 0.8) + 
+  facet_wrap(~ k)
+p2
+
+```
+
+
+
+```{r}
+
+#5
+ggplot(clusterings2, aes(k, tot.withinss)) +
+  geom_line() +
+  geom_point() + theme_bw()
+```
+
+
+
+```{r}
+#6
+set.seed(64)
+clusts3 = 
+  tibble(k = 4) %>% #try from 1 to 10 clusters
+  mutate(
+    kclust3 = map(k, ~kmeans(trucks_scaled, .x)),
+    tidied3 = map(kclust3, tidy),
+    glanced3 = map(kclust3, glance),
+    augmented3 = map(kclust3, augment, trucks_scaled)
+  )
+
+clusters3 =
+  clusts3 %>%
+  unnest(cols = c(tidied3))
+
+assignments3 = 
+  clusts3 %>% 
+  unnest(cols = c(augmented3))
+
+clusterings3 = 
+  clusts3 %>%
+  unnest(cols = c(glanced3))
+
+p3 = 
+  ggplot(assignments3, aes(x = Distance, y = Speeding)) +
+  geom_point(aes(color = .cluster), alpha = 0.8) + 
+  facet_wrap(~ k)
+p3
+```
+
+
